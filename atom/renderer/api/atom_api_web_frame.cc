@@ -195,8 +195,8 @@ void WebFrame::SetSpellCheckProvider(mate::Arguments* args,
     return;
   }
 
-  std::unique_ptr<SpellCheckClient> client(new SpellCheckClient(
-      language, auto_spell_correct_turned_on, args->isolate(), provider));
+  auto client = std::make_unique<SpellCheckClient>(
+      language, auto_spell_correct_turned_on, args->isolate(), provider);
   // Set spellchecker for all live frames in the same process or
   // in the sandbox mode for all live sub frames to this WebFrame.
   FrameSpellChecker spell_checker(
@@ -442,13 +442,13 @@ v8::Local<v8::Value> WebFrame::FindFrameByName(const std::string& name) const {
 
 v8::Local<v8::Value> WebFrame::FindFrameByRoutingId(int routing_id) const {
   content::RenderFrame* render_frame =
-    content::RenderFrame::FromRoutingID(routing_id);
+      content::RenderFrame::FromRoutingID(routing_id);
   blink::WebLocalFrame* local_frame = nullptr;
   if (render_frame)
     local_frame = render_frame->GetWebFrame();
   if (local_frame)
-    return mate::CreateHandle(isolate(),
-                              new WebFrame(isolate(), local_frame)).ToV8();
+    return mate::CreateHandle(isolate(), new WebFrame(isolate(), local_frame))
+        .ToV8();
   else
     return v8::Null(isolate());
 }

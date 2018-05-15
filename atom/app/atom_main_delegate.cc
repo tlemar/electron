@@ -203,7 +203,7 @@ bool AtomMainDelegate::DelaySandboxInitialization(
 
 std::unique_ptr<brightray::ContentClient>
 AtomMainDelegate::CreateContentClient() {
-  return std::unique_ptr<brightray::ContentClient>(new AtomContentClient);
+  return std::make_unique<AtomContentClient>();
 }
 
 }  // namespace atom

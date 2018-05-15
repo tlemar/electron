@@ -42,7 +42,7 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
     int width,
     int height) {
   std::vector<gfx::Rect> result;
-  std::unique_ptr<SkRegion> non_draggable(new SkRegion);
+  auto non_draggable = std::make_unique<SkRegion>();
   non_draggable->op(0, 0, width, height, SkRegion::kUnion_Op);
   non_draggable->op(*draggable, SkRegion::kDifference_Op);
   for (SkRegion::Iterator it(*non_draggable); !it.done(); it.next()) {
