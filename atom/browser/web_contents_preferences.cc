@@ -170,19 +170,21 @@ void WebContentsPreferences::AppendCommandLineSwitches(
     command_line->AppendSwitch(switches::kNativeWindowOpen);
 
   // The preload script.
-  base::FilePath::StringType preload;
-  if (dict_.GetString(options::kPreloadScript, &preload)) {
-    if (base::FilePath(preload).IsAbsolute())
-      command_line->AppendSwitchNative(switches::kPreloadScript, preload);
-    else
-      LOG(ERROR) << "preload script must have absolute path.";
-  } else if (dict_.GetString(options::kPreloadURL, &preload)) {
-    // Translate to file path if there is "preload-url" option.
-    base::FilePath preload_path;
-    if (net::FileURLToFilePath(GURL(preload), &preload_path))
-      command_line->AppendSwitchPath(switches::kPreloadScript, preload_path);
-    else
-      LOG(ERROR) << "preload url must be file:// protocol.";
+  if (!command_line->HasSwitch(switches::kEnableSandbox)) {
+    base::FilePath::StringType preload;
+    if (dict_.GetString(options::kPreloadScript, &preload)) {
+      if (base::FilePath(preload).IsAbsolute())
+        command_line->AppendSwitchNative(switches::kPreloadScript, preload);
+      else
+        LOG(ERROR) << "preload script must have absolute path.";
+    } else if (dict_.GetString(options::kPreloadURL, &preload)) {
+      // Translate to file path if there is "preload-url" option.
+      base::FilePath preload_path;
+      if (net::FileURLToFilePath(GURL(preload), &preload_path))
+        command_line->AppendSwitchPath(switches::kPreloadScript, preload_path);
+      else
+        LOG(ERROR) << "preload url must be file:// protocol.";
+    }
   }
 
   // Custom args for renderer process
