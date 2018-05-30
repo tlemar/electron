@@ -30,7 +30,8 @@ struct Converter<gfx::Point> {
 
 template <>
 struct Converter<gfx::PointF> {
-  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate, const gfx::PointF& val);
+  static v8::Local<v8::Value> ToV8(v8::Isolate* isolate,
+                                   const gfx::PointF& val);
   static bool FromV8(v8::Isolate* isolate,
                      v8::Local<v8::Value> val,
                      gfx::PointF* out);
