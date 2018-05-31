@@ -20,9 +20,25 @@ describe('<webview> tag', function () {
   let webview = null
   let w = null
 
+  const openTheWindow = async (...args) => {
+    await closeTheWindow()
+    w = new BrowserWindow(...args)
+    return w
+  }
+
+  const closeTheWindow = () => {
+    return closeWindow(w).then(() => { w = null })
+  }
+
   const waitForEvent = (eventTarget, eventName) => {
     return new Promise((resolve) => {
       eventTarget.addEventListener(eventName, resolve, {once: true})
+    })
+  }
+
+  const waitForOnce = (eventTarget, eventName) => {
+    return new Promise((resolve) => {
+      eventTarget.once(eventName, (...args) => resolve(args))
     })
   }
 
@@ -48,35 +64,33 @@ describe('<webview> tag', function () {
       document.body.appendChild(webview)
     }
     webview.remove()
-    return closeWindow(w).then(() => { w = null })
+
+    return closeTheWindow()
   })
 
-  it('works without script tag in page', (done) => {
-    w = new BrowserWindow({show: false})
-    ipcMain.once('pong', () => done())
+  it('works without script tag in page', async () => {
+    await openTheWindow({show: false})
     w.loadURL('file://' + fixtures + '/pages/webview-no-script.html')
+    await waitForOnce(ipcMain, 'pong')
   })
 
-  it('is disabled when nodeIntegration is disabled', (done) => {
-    w = new BrowserWindow({
+  it('is disabled when nodeIntegration is disabled', async () => {
+    await openTheWindow({
       show: false,
       webPreferences: {
         nodeIntegration: false,
         preload: path.join(fixtures, 'module', 'preload-webview.js')
       }
     })
-    ipcMain.once('webview', (event, type) => {
-      if (type === 'undefined') {
-        done()
-      } else {
-        done('WebView still exists')
-      }
-    })
+
     w.loadURL(`file://${fixtures}/pages/webview-no-script.html`)
+    const [, type] = await waitForOnce(ipcMain, 'webview')
+
+    assert(type === 'undefined', 'WebView still exists')
   })
 
-  it('is enabled when the webviewTag option is enabled and the nodeIntegration option is disabled', (done) => {
-    w = new BrowserWindow({
+  it('is enabled when the webviewTag option is enabled and the nodeIntegration option is disabled', async () => {
+    await openTheWindow({
       show: false,
       webPreferences: {
         nodeIntegration: false,
@@ -84,14 +98,11 @@ describe('<webview> tag', function () {
         webviewTag: true
       }
     })
-    ipcMain.once('webview', (event, type) => {
-      if (type !== 'undefined') {
-        done()
-      } else {
-        done('WebView is not created')
-      }
-    })
+
     w.loadURL(`file://${fixtures}/pages/webview-no-script.html`)
+    const [, type] = await waitForOnce(ipcMain, 'webview')
+
+    assert(type !== 'undefined', 'WebView is not created')
   })
 
   describe('src attribute', () => {
@@ -1097,37 +1108,35 @@ describe('<webview> tag', function () {
       ipcMain.removeAllListeners('pong')
     })
 
-    it('updates when the window is shown after the ready-to-show event', (done) => {
-      w = new BrowserWindow({ show: false })
-      w.once('ready-to-show', () => {
-        w.show()
-      })
-
-      ipcMain.on('pong', (event, visibilityState, hidden) => {
-        if (!hidden) {
-          assert.equal(visibilityState, 'visible')
-          done()
-        }
-      })
-
+    it('updates when the window is shown after the ready-to-show event', async () => {
+      await openTheWindow({ show: false })
       w.loadURL(`file://${fixtures}/pages/webview-visibilitychange.html`)
+
+      await waitForOnce(w, 'ready-to-show')
+      w.show()
+
+      const [, visibilityState, hidden] = await waitForOnce(ipcMain, 'pong')
+      assert(!hidden)
+      assert.equal(visibilityState, 'visible')
     })
 
-    it('inherits the parent window visibility state and receives visibilitychange events', (done) => {
-      w = new BrowserWindow({ show: false })
-
-      ipcMain.once('pong', (event, visibilityState, hidden) => {
-        assert.equal(visibilityState, 'hidden')
-        assert.equal(hidden, true)
-
-        ipcMain.once('pong', function (event, visibilityState, hidden) {
-          assert.equal(visibilityState, 'visible')
-          assert.equal(hidden, false)
-          done()
-        })
-        w.webContents.emit('-window-visibility-change', 'visible')
-      })
+    it('inherits the parent window visibility state and receives visibilitychange events', async () => {
+      await openTheWindow({ show: false })
       w.loadURL(`file://${fixtures}/pages/webview-visibilitychange.html`)
+
+      let [, visibilityState, hidden] = await waitForOnce(ipcMain, 'pong')
+      assert.equal(visibilityState, 'hidden')
+      assert.equal(hidden, true)
+
+      // We have to start waiting for the event
+      // before we ask the webContents to resize.
+      let getResponse = waitForOnce(ipcMain, 'pong')
+      w.webContents.emit('-window-visibility-change', 'visible')
+
+      return getResponse.then(([, visibilityState, hidden]) => {
+        assert.equal(visibilityState, 'visible')
+        assert.equal(hidden, false)
+      })
     })
   })
 
@@ -1166,20 +1175,18 @@ describe('<webview> tag', function () {
   })
 
   describe('did-attach-webview event', () => {
-    it('is emitted when a webview has been attached', (done) => {
-      w = new BrowserWindow({ show: false })
-      w.webContents.on('did-attach-webview', (event, webContents) => {
-        ipcMain.once('webview-dom-ready', (event, id) => {
-          assert.equal(webContents.id, id)
-          done()
-        })
-      })
+    it('is emitted when a webview has been attached', async () => {
+      await openTheWindow({ show: false })
       w.loadURL(`file://${fixtures}/pages/webview-did-attach-event.html`)
+
+      const [, webContents] = await waitForOnce(w.webContents, 'did-attach-webview')
+      const [, id] = await waitForOnce(ipcMain, 'webview-dom-ready')
+      expect(webContents.id).to.equal(id)
     })
   })
 
-  it('loads devtools extensions registered on the parent window', (done) => {
-    w = new BrowserWindow({ show: false })
+  it('loads devtools extensions registered on the parent window', async () => {
+    await openTheWindow({ show: false })
     BrowserWindow.removeDevToolsExtension('foo')
 
     const extensionPath = path.join(__dirname, 'fixtures', 'devtools-extensions', 'foo')
@@ -1187,11 +1194,9 @@ describe('<webview> tag', function () {
 
     w.loadURL(`file://${fixtures}/pages/webview-devtools.html`)
 
-    ipcMain.once('answer', (event, message) => {
-      assert.equal(message.runtimeId, 'foo')
-      assert.notEqual(message.tabId, w.webContents.id)
-      done()
-    })
+    const [, {runtimeId, tabId}] = await waitForOnce(ipcMain, 'answer')
+    expect(runtimeId).to.equal('foo')
+    expect(tabId).to.be.not.equal(w.webContents.id)
   })
 
   describe('guestinstance attribute', () => {
@@ -1472,110 +1477,101 @@ describe('<webview> tag', function () {
       assert(!webview.hasAttribute('disableguestresize'))
     })
 
-    it('resizes guest when attribute is not present', (done) => {
-      w = new BrowserWindow({show: false, width: 200, height: 200})
+    it('resizes guest when attribute is not present', async () => {
+      const INITIAL_SIZE = 200
+      await openTheWindow({show: false, width: INITIAL_SIZE, height: INITIAL_SIZE})
       w.loadURL(`file://${fixtures}/pages/webview-guest-resize.html`)
+      await waitForOnce(ipcMain, 'webview-loaded')
 
-      w.webContents.once('did-finish-load', () => {
-        const CONTENT_SIZE = 300
-
-        const elementResizePromise = new Promise(resolve => {
-          ipcMain.once('webview-element-resize', (event, width, height) => {
+      const elementResize = waitForOnce(ipcMain, 'webview-element-resize')
+          .then(([event, width, height]) => {
             assert.equal(width, CONTENT_SIZE)
             assert.equal(height, CONTENT_SIZE)
-            resolve()
           })
-        })
 
-        const guestResizePromise = new Promise(resolve => {
-          ipcMain.once('webview-guest-resize', (event, width, height) => {
+      const guestResize = waitForOnce(ipcMain, 'webview-guest-resize')
+          .then(([, width, height]) => {
             assert.equal(width, CONTENT_SIZE)
             assert.equal(height, CONTENT_SIZE)
-            resolve()
           })
-        })
 
-        Promise.all([elementResizePromise, guestResizePromise]).then(() => done())
+      const CONTENT_SIZE = 300
+      assert(CONTENT_SIZE !== INITIAL_SIZE)
+      w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
 
-        w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
-      })
+      return Promise.all([elementResize, guestResize])
     })
 
-    it('does not resize guest when attribute is present', done => {
-      w = new BrowserWindow({show: false, width: 200, height: 200})
+    it('does not resize guest when attribute is present', async () => {
+      const INITIAL_SIZE = 200
+      await openTheWindow({show: false, width: INITIAL_SIZE, height: INITIAL_SIZE})
       w.loadURL(`file://${fixtures}/pages/webview-no-guest-resize.html`)
+      await waitForOnce(ipcMain, 'webview-loaded')
 
-      w.webContents.once('did-finish-load', () => {
-        const CONTENT_SIZE = 300
-
-        const elementResizePromise = new Promise(resolve => {
-          ipcMain.once('webview-element-resize', (event, width, height) => {
-            assert.equal(width, CONTENT_SIZE)
-            assert.equal(height, CONTENT_SIZE)
-            resolve()
-          })
-        })
-
-        const noGuestResizePromise = new Promise(resolve => {
-          const onGuestResize = (event, width, height) => {
-            done(new Error('Unexpected guest resize message'))
-          }
-          ipcMain.once('webview-guest-resize', onGuestResize)
-
-          setTimeout(() => {
-            ipcMain.removeListener('webview-guest-resize', onGuestResize)
-            resolve()
-          }, 500)
-        })
-
-        Promise.all([elementResizePromise, noGuestResizePromise]).then(() => done())
-
-        w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
-      })
-    })
-
-    it('dispatches element resize event even when attribute is present', done => {
-      w = new BrowserWindow({show: false, width: 200, height: 200})
-      w.loadURL(`file://${fixtures}/pages/webview-no-guest-resize.html`)
-
-      w.webContents.once('did-finish-load', () => {
-        const CONTENT_SIZE = 300
-
-        ipcMain.once('webview-element-resize', (event, width, height) => {
-          assert.equal(width, CONTENT_SIZE)
-          done()
-        })
-
-        w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
-      })
-    })
-
-    it('can be manually resized with setSize even when attribute is present', function (done) {
-      w = new BrowserWindow({show: false, width: 200, height: 200})
-      w.loadURL(`file://${fixtures}/pages/webview-no-guest-resize.html`)
-
-      w.webContents.once('did-finish-load', () => {
-        const GUEST_WIDTH = 10
-        const GUEST_HEIGHT = 20
-
-        ipcMain.once('webview-guest-resize', (event, width, height) => {
-          assert.equal(width, GUEST_WIDTH)
-          assert.equal(height, GUEST_HEIGHT)
-          done()
-        })
-
-        for (const wc of webContents.getAllWebContents()) {
-          if (wc.hostWebContents &&
-              wc.hostWebContents.id === w.webContents.id) {
-            wc.setSize({
-              normal: {
-                width: GUEST_WIDTH,
-                height: GUEST_HEIGHT
-              }
-            })
-          }
+      const noGuestResizePromise = Promise.race([
+        waitForOnce(ipcMain, 'webview-guest-resize'),
+        new Promise(resolve => setTimeout(() => resolve(), 500))
+      ]).then((eventData = null) => {
+        if (eventData !== null) {
+          // Means we got the 'webview-guest-resize' event before the time out.
+          return Promise.reject(new Error('Unexpected guest resize message'))
         }
       })
+
+      const CONTENT_SIZE = 300
+      assert(CONTENT_SIZE !== INITIAL_SIZE)
+      w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
+
+      return noGuestResizePromise
+    })
+
+    it('dispatches element resize event even when attribute is present', async () => {
+      const INITIAL_SIZE = 200
+      await openTheWindow({show: false, width: INITIAL_SIZE, height: INITIAL_SIZE})
+      w.loadURL(`file://${fixtures}/pages/webview-no-guest-resize.html`)
+      await waitForOnce(ipcMain, 'webview-loaded')
+
+      const elementResizePromise = waitForOnce(ipcMain, 'webview-element-resize')
+          .then(([, width, height]) => {
+            expect(width).to.equal(CONTENT_SIZE)
+            expect(height).to.equal(CONTENT_SIZE)
+          })
+
+      const CONTENT_SIZE = 300
+      assert(CONTENT_SIZE !== INITIAL_SIZE)
+      w.setContentSize(CONTENT_SIZE, CONTENT_SIZE)
+
+      return elementResizePromise
+    })
+
+    it('can be manually resized with setSize even when attribute is present', async () => {
+      const INITIAL_SIZE = 200
+      await openTheWindow({show: false, width: INITIAL_SIZE, height: INITIAL_SIZE})
+      w.loadURL(`file://${fixtures}/pages/webview-no-guest-resize.html`)
+      await waitForOnce(ipcMain, 'webview-loaded')
+
+      const GUEST_WIDTH = 10
+      const GUEST_HEIGHT = 20
+
+      const guestResizePromise = waitForOnce(ipcMain, 'webview-guest-resize')
+          .then(([event, width, height]) => {
+            expect(width).to.be.equal(GUEST_WIDTH)
+            expect(height).to.be.equal(GUEST_HEIGHT)
+          })
+
+      const wc = webContents.getAllWebContents().find((wc) => {
+        return wc.hostWebContents &&
+            wc.hostWebContents.id === w.webContents.id
+      })
+      assert(wc)
+      wc.setSize({
+        normal: {
+          width: GUEST_WIDTH,
+          height: GUEST_HEIGHT
+        }
+      })
+
+      return guestResizePromise
     })
   })
 
@@ -1595,68 +1591,84 @@ describe('<webview> tag', function () {
       protocol.unregisterProtocol(zoomScheme, (error) => done(error))
     })
 
-    it('inherits the zoomFactor of the parent window', (done) => {
-      w = new BrowserWindow({
+    it('inherits the zoomFactor of the parent window', async () => {
+      await openTheWindow({
         show: false,
         webPreferences: {
           zoomFactor: 1.2
         }
-      })
-      ipcMain.once('webview-parent-zoom-level', (event, zoomFactor, zoomLevel) => {
-        assert.equal(zoomFactor, 1.2)
-        assert.equal(zoomLevel, 1)
-        done()
       })
       w.loadURL(`file://${fixtures}/pages/webview-zoom-factor.html`)
+
+      const [, zoomFactor, zoomLevel] = await waitForOnce(ipcMain, 'webview-parent-zoom-level')
+      expect(zoomFactor).to.equal(1.2)
+      expect(zoomLevel).to.equal(1)
     })
 
-    it('maintains zoom level on navigation', (done) => {
-      w = new BrowserWindow({
+    it('maintains zoom level on navigation', async () => {
+      return openTheWindow({
         show: false,
         webPreferences: {
           zoomFactor: 1.2
         }
+      }).then(() => {
+        const promise = new Promise((resolve) => {
+          ipcMain.on('webview-zoom-level', (event, zoomLevel, zoomFactor, newHost, final) => {
+            if (!newHost) {
+              expect(zoomFactor).to.equal(1.44)
+              expect(zoomLevel).to.equal(2.0)
+            } else {
+              expect(zoomFactor).to.equal(1.2)
+              expect(zoomLevel).to.equal(1)
+            }
+
+            if (final) {
+              resolve()
+            }
+          })
+        })
+
+        w.loadURL(`file://${fixtures}/pages/webview-custom-zoom-level.html`)
+
+        return promise
       })
-      ipcMain.on('webview-zoom-level', (event, zoomLevel, zoomFactor, newHost, final) => {
-        if (!newHost) {
-          assert.equal(zoomFactor, 1.44)
-          assert.equal(zoomLevel, 2.0)
-        } else {
-          assert.equal(zoomFactor, 1.2)
-          assert.equal(zoomLevel, 1)
-        }
-        if (final) done()
-      })
-      w.loadURL(`file://${fixtures}/pages/webview-custom-zoom-level.html`)
     })
 
-    it('maintains zoom level when navigating within same page', (done) => {
-      w = new BrowserWindow({
+    it('maintains zoom level when navigating within same page', async () => {
+      return openTheWindow({
         show: false,
         webPreferences: {
           zoomFactor: 1.2
         }
+      }).then(() => {
+        const promise = new Promise((resolve) => {
+          ipcMain.on('webview-zoom-in-page', (event, zoomLevel, zoomFactor, final) => {
+            expect(zoomFactor).to.equal(1.44)
+            expect(zoomLevel).to.equal(2.0)
+
+            if (final) {
+              resolve()
+            }
+          })
+        })
+
+        w.loadURL(`file://${fixtures}/pages/webview-in-page-navigate.html`)
+
+        return promise
       })
-      ipcMain.on('webview-zoom-in-page', (event, zoomLevel, zoomFactor, final) => {
-        assert.equal(zoomFactor, 1.44)
-        assert.equal(zoomLevel, 2.0)
-        if (final) done()
-      })
-      w.loadURL(`file://${fixtures}/pages/webview-in-page-navigate.html`)
     })
 
-    it('inherits zoom level for the origin when available', (done) => {
-      w = new BrowserWindow({
+    it('inherits zoom level for the origin when available', async () => {
+      await openTheWindow({
         show: false,
         webPreferences: {
           zoomFactor: 1.2
         }
-      })
-      ipcMain.once('webview-origin-zoom-level', (event, zoomLevel) => {
-        assert.equal(zoomLevel, 2.0)
-        done()
       })
       w.loadURL(`file://${fixtures}/pages/webview-origin-zoom-level.html`)
+
+      const [, zoomLevel] = await waitForOnce(ipcMain, 'webview-origin-zoom-level')
+      expect(zoomLevel).to.equal(2.0)
     })
   })
 
@@ -1667,61 +1679,69 @@ describe('<webview> tag', function () {
       webview.setAttribute('webpreferences', 'nativeWindowOpen=1')
     })
 
-    it('opens window of about:blank with cross-scripting enabled', (done) => {
-      ipcMain.once('answer', (event, content) => {
-        assert.equal(content, 'Hello')
-        done()
-      })
+    it('opens window of about:blank with cross-scripting enabled', async () => {
+      // Don't wait for loading to finish.
       loadWebView(webview, {
         src: `file://${path.join(fixtures, 'api', 'native-window-open-blank.html')}`
       })
+
+      const [, content] = await waitForOnce(ipcMain, 'answer')
+      expect(content).to.equal('Hello')
     })
 
-    it('opens window of same domain with cross-scripting enabled', (done) => {
-      ipcMain.once('answer', (event, content) => {
-        assert.equal(content, 'Hello')
-        done()
-      })
+    it('opens window of same domain with cross-scripting enabled', async () => {
+      // Don't wait for loading to finish.
       loadWebView(webview, {
         src: `file://${path.join(fixtures, 'api', 'native-window-open-file.html')}`
       })
+
+      const [, content] = await waitForOnce(ipcMain, 'answer')
+      expect(content).to.equal('Hello')
     })
 
-    it('returns null from window.open when allowpopups is not set', (done) => {
+    it('returns null from window.open when allowpopups is not set', async () => {
       webview.removeAttribute('allowpopups')
-      ipcMain.once('answer', (event, {windowOpenReturnedNull}) => {
-        assert.equal(windowOpenReturnedNull, true)
-        done()
-      })
+
+      // Don't wait for loading to finish.
       loadWebView(webview, {
         src: `file://${path.join(fixtures, 'api', 'native-window-open-no-allowpopups.html')}`
       })
+
+      const [, {windowOpenReturnedNull}] = await waitForOnce(ipcMain, 'answer')
+      expect(windowOpenReturnedNull).to.equal(true)
     })
 
-    it('blocks accessing cross-origin frames', (done) => {
-      ipcMain.once('answer', (event, content) => {
-        assert.equal(content, 'Blocked a frame with origin "file://" from accessing a cross-origin frame.')
-        done()
-      })
+    it('blocks accessing cross-origin frames', async () => {
+      // Don't wait for loading to finish.
       loadWebView(webview, {
         src: `file://${path.join(fixtures, 'api', 'native-window-open-cross-origin.html')}`
       })
+
+      const [, content] = await waitForOnce(ipcMain, 'answer')
+      const expectedContent =
+          'Blocked a frame with origin "file://" from accessing a cross-origin frame.'
+
+      expect(content).to.equal(expectedContent)
     })
 
     it('emits a new-window event', async () => {
+      // Don't wait for loading to finish.
       loadWebView(webview, {
         src: `file://${fixtures}/pages/window-open.html`
       })
-      const event = await waitForEvent(webview, 'new-window')
+      const {url, frameName} = await waitForEvent(webview, 'new-window')
 
-      assert.equal(event.url, 'http://host/')
-      assert.equal(event.frameName, 'host')
+      expect(url).to.equal('http://host/')
+      expect(frameName).to.equal('host')
     })
 
-    it('emits a browser-window-created event', (done) => {
-      app.once('browser-window-created', () => done())
-      webview.src = `file://${fixtures}/pages/window-open.html`
-      document.body.appendChild(webview)
+    it('emits a browser-window-created event', async () => {
+      // Don't wait for loading to finish.
+      loadWebView(webview, {
+        src: `file://${fixtures}/pages/window-open.html`
+      })
+
+      await waitForOnce(app, 'browser-window-created')
     })
 
     it('emits a web-contents-created event', (done) => {
